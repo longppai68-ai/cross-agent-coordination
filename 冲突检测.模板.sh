@@ -1,6 +1,6 @@
 #!/bin/bash
 # 冲突检测 —— 针对「缺口①：无并发保护」
-# 检测：① 不同作者写入过近（真并发窗口）② 日志物理顺序 ≠ 时间顺序 ③ 半截行/格式异常
+# 检测：① 不同作者写入过近（真并发窗口）② 日志物理顺序 ≠ 时间顺序 ③ 半截行/格式异常 ④ 表格列数不一致
 # 用法: bash 冲突检测.sh [交接文件]      # 缺省读同目录下的 工作协调.md
 DIR="$(cd "$(dirname "$0")" && pwd)"
 F="${1:-$DIR/工作协调.md}"
@@ -57,8 +57,9 @@ else:
     print("  ✅ 物理顺序与时间顺序一致")
 
 # 内容时间戳的精度
-no_sec = [e for e in ent if e['ts'].count(':') == 2]
-print(f"  时间戳带秒的条目: {len(no_sec)}/{len(ent)}  →  {'可做秒级碰撞检测' if no_sec else '仅分钟级精度，无法精确定位碰撞（建议条目加「写于 HH:MM:SS」）'}")
+with_w = sum(1 for l in lines if re.search(r'（写于 \d{1,2}:\d{2}:\d{2}）', l))
+print(f"  带「写于 HH:MM:SS」的条目: {with_w}/{len(ent)}  →  " +
+      ("可做秒级碰撞检测" if with_w else "仅分钟级精度，无法精确定位碰撞（建议条目加「写于 HH:MM:SS」）"))
 
 # ③ 半截行 / 格式异常
 bad = []
@@ -85,11 +86,37 @@ if bad:
 else:
     print("  ✅ 未发现半截行或标题格式异常")
 
+# ④ 表格完整性（Markdown 表格被截断会让整段渲染成游离文本）
+from collections import Counter
+blocks, cur = [], []
+for i, l in enumerate(lines, 1):
+    if l.startswith('|'):
+        cur.append((i, l))
+    else:
+        if cur: blocks.append(cur); cur = []
+if cur: blocks.append(cur)
+tbl_bad = []
+for b in blocks:
+    cnt = [(i, l.count('|') - 1) for i, l in b]
+    if len(cnt) < 2:
+        continue
+    mode = Counter(c for _, c in cnt).most_common(1)[0][0]
+    for i, c in cnt:
+        if c != mode:
+            tbl_bad.append((i, c, mode))
+if tbl_bad:
+    print(f"  ⚠️ 表格列数不一致 {len(tbl_bad)} 处（多数列为基准）:")
+    for i, c, m in tbl_bad[:6]:
+        print(f"       行{i:>4} 有 {c} 列，同表多数为 {m} 列 → 表格会被截断")
+else:
+    print(f"  ✅ 表格完整性正常（检查了 {len(blocks)} 个表格块）")
+
 # 结论建议
 print()
 if near or inv:
     print("  ▶ 建议：启用「追加即一切」——状态板改为快照行（last-write-wins），禁止就地编辑；")
-    print("          条目同时记录「写于 HH:MM:SS」以支撑秒级碰撞检测。")
+    if with_w == 0:
+        print("          条目同时记录「写于 HH:MM:SS」以支撑秒级碰撞检测。")
 else:
     print("  ▶ 当前风险低，但机制缺口仍在：建议按指导书 §十 的前两级改造。")
 PY
