@@ -1,0 +1,5 @@
+# 运行时状态（不应入库）
+.watch_marker
+.hb_*
+.lock/
+*.pdf
